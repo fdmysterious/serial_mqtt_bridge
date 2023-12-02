@@ -8,9 +8,28 @@ Configuration schema definition
 """
 
 from dataclasses import dataclass
-from typing      import Optional
+from typing      import Optional, List, Tuple
 from enum        import Enum
 
+
+def _check_type(x, field_name, tt):
+    """
+    Utility function to check dictionary type with a standard
+    error message.
+    """
+    if not isinstance(x[field_name], tt):
+        raise ValueError(f"'{field_name}' is a '{type(x[field_name])}', not a '{tt.__name__}'")
+
+def _check_opt_type(x, field_name, tt):
+    """
+    Like _check_type, but for optional values
+    """
+
+    if field_name in x:
+        _check_type(x, field_name, tt)
+
+
+############################################################
 
 class SerialParity(Enum):
     NoParity = "none"
@@ -31,10 +50,8 @@ class SerialConfig:
 
     @classmethod
     def from_dict(cls, x):
-        if not isinstance(x["hwflow"], bool):
-            raise ValueError(f"hwflow is a '{type(x['hwflow'])}', not a 'bool'")
-        if not isinstance(x["path"], str):
-            raise ValueError(f"path is a '{type(x['path'])}, not a 'str'")
+        _check_type(x, "hwflow", bool)
+        _check_type(x, "path"  , str )
 
         return cls(
             baudrate  = int(x["baudrate"]),
@@ -54,14 +71,10 @@ class MqttConfig:
 
     @classmethod
     def from_dict(cls, x):
-        if not isinstance(x["host"], str):
-            raise ValueError(f"host is a '{type(x['host'])}, not a 'str'")
-        if not isinstance(x["topic_prefix"], str):
-            raise ValueError(f"topic_prefix is a '{type(x['topic_prefix'])}, not a 'str'")
-        if "username" in x and not isinstance(x["username"], str):
-            raise ValueError(f"username is a '{type(x['username'])}, not a 'str'")
-        if "password" in x and not isinstance(x["password"], str):
-            raise ValueError(f"password is a '{type(x['password'])}, not a 'str'")
+        _check_type    (x, "host"        , str)
+        _check_type    (x, "topic_prefix", str)
+        _check_opt_type(x, "username"    , str)
+        _check_opt_type(x, "password"    , str)
 
         return cls(
             host         = str(x["host"]),
@@ -72,13 +85,66 @@ class MqttConfig:
         )
 
 @dataclass
+class EndpointSerialMirrorConfig:
+    name: str
+    path: str
+
+    @classmethod
+    def from_dict(cls, x):
+        _check_type(x, "name", str)
+        _check_type(x, "path", str)
+
+        return cls(
+            name = x["name"],
+            path = x["path"],
+        )
+
+
+@dataclass
+class EndpointVirtualConfig:
+    name: str
+
+    @classmethod
+    def from_dict(cls, x):
+        _check_type(x, "name", str)
+
+        return cls(
+            name = x["name"],
+        )
+
+@dataclass
+class EndpointConfig:
+    ENDPOINT_PROVIDERS = {
+        "serial-mirror":  EndpointSerialMirrorConfig,
+        "virtual":        EndpointVirtualConfig, 
+    }
+
+    provider:    str
+    config_data: any
+
+    @classmethod
+    def from_dict(cls, x):
+        _check_type(x, "provider", str)
+
+        if not x["provider"] in cls.ENDPOINT_PROVIDERS:
+            raise ValueError(f"Unknown endpoint provider: {x['provider']}")
+
+        return cls(
+            provider    = x["provider"],
+            config_data = cls.ENDPOINT_PROVIDERS[x['provider']].from_dict(x)
+        )
+
+
+@dataclass
 class ConfigSchema:
     serial: SerialConfig
     mqtt: MqttConfig
+    endpoints: Tuple[EndpointConfig]
 
     @classmethod
     def from_dict(cls, x):
         return cls(
-            serial = SerialConfig.from_dict(x["serial"]),
-            mqtt   = MqttConfig.from_dict(x["mqtt"]),
+            serial    = SerialConfig.from_dict(x["serial"]),
+            mqtt      = MqttConfig.from_dict(x["mqtt"]),
+            endpoints = tuple(map(EndpointConfig.from_dict, x.get("endpoints", []))),
         )
