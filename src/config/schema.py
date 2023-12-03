@@ -12,6 +12,9 @@ from typing      import Optional, List, Tuple
 from enum        import Enum
 
 
+import serial
+
+
 def _check_type(x, field_name, tt):
     """
     Utility function to check dictionary type with a standard
@@ -36,9 +39,23 @@ class SerialParity(Enum):
     Odd      = "odd"
     Even     = "even"
 
+    def to_pyserial(self):
+        if self == self.NoParity:
+            return serial.PARITY_NONE
+        elif self == self.Odd:
+            return serial.PARITY_ODD
+        elif self == self.Even:
+            return serial.PARITY_EVEN
+
 class SerialStopBits(Enum):
     One      = 1
     Two      = 2
+
+    def to_pyserial(self):
+        if self == self.One:
+            return serial.STOPBITS_ONE
+        elif self == self.Two:
+            return serial.STOPBITS_TWO
 
 @dataclass
 class SerialConfig:
@@ -83,22 +100,6 @@ class MqttConfig:
             username     = x.get("username"),
             password     = x.get("password"),
         )
-
-@dataclass
-class EndpointSerialMirrorConfig:
-    name: str
-    path: str
-
-    @classmethod
-    def from_dict(cls, x):
-        _check_type(x, "name", str)
-        _check_type(x, "path", str)
-
-        return cls(
-            name = x["name"],
-            path = x["path"],
-        )
-
 
 @dataclass
 class ConfigSchema:

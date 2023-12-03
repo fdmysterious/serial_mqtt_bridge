@@ -1,0 +1,11 @@
+[mqtt]
+host         = "localhost"
+port         = 1883
+topic_prefix = "interfaces/test-serial"
+
+[serial]
+path         = "/dev/serial/by-id/usb-FTDI_UART_Adapter-if00-port0"
+baudrate     = 115200
+parity       = "none"
+stop_bits    = 1
+hwflow       = false
