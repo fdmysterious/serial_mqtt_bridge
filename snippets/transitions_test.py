@@ -1,9 +1,10 @@
 from transitions.extensions        import AsyncGraphMachine
 from transitions.extensions.states import Timeout, add_state_features
-
 from types                         import SimpleNamespace
 
 import aiomqtt
+import serial
+import serial_asyncio
 import paho.mqtt as mqtt
 
 import logging
@@ -47,7 +48,7 @@ class ServerStateMachine(object):
         machine = cls.__gen_fsm(obj)
         return machine.get_graph()
 
-    def __init__(self, client, topic):
+    def __init__(self, client, topic, serial_path):
         self.machine             = self.__gen_fsm(self)
         self.client              = client # MQTT client object
         self.topic               = topic  # Base topic 
@@ -57,20 +58,27 @@ class ServerStateMachine(object):
 
         self.timeout_task        = None   # Current timeout task
 
+        self.serial_path         = serial_path
+        self.serial_reader       = None   # Asyncio reader
+        self.serial_writer       = None   # Asyncio writer for serial
+
+        self.serial_opened       = asyncio.Event()
+        self.read_buffer         = bytearray()
+
 
     # ------------------- Worker and request processing
 
-    async def worker(self):
+    async def mqtt_worker(self):
         logger.info("Starting server worker task...")
         async with self.client.messages() as messages:
-            await self.client.subscribe(f"{self.topic}/+/request/server_endpoint")
+            await self.client.subscribe(f"{self.topic}/endpoints/+/request/server_endpoint")
             async for message in messages:
-                if message.topic.matches(f"{self.topic}/+/request/server_endpoint"):
+                if message.topic.matches(f"{self.topic}/endpoints/+/request/server_endpoint"):
                     await self.process_server_req(message)
 
     async def process_server_req(self, message):
         req      = message.payload.decode("ascii")
-        endpoint = message.topic.value.replace(f"{self.topic}/", "").replace("/request/server_endpoint", "")
+        endpoint = message.topic.value.replace(f"{self.topic}/endpoints/", "").replace("/request/server_endpoint", "")
 
         logger.info(f"Processing server request '{req}' on endpoint '{endpoint}'")
 
@@ -87,11 +95,67 @@ class ServerStateMachine(object):
             if (self.state == "replace_request") and (endpoint == self.replace_endpoint):
                 await self.replace_no()
 
+
+    # ------------------- Worker and request processing
+
+    async def serial_received_data(self, data):
+        # Send received data to active endpoint
+        if self.active_endpoint is not None:
+            if self.read_buffer:
+                await self.send_data_to_endpoint(self.active_endpoint, bytes(self.read_buffer))
+                self.read_buffer = bytearray()
+            await self.send_data_to_endpoint(self.active_endpoint, data)
+
+        # Send to spy endpoint
+        await self.send_received_data(data)
+
+
+    async def serial_worker(self):
+        logger.info("Starting serial worker...")
+        self.serial_reader, self.serial_writer = await serial_asyncio.open_serial_connection(
+            url      = self.serial_path,
+            baudrate = 115200,
+            parity   = serial.PARITY_NONE,
+            stopbits = serial.STOPBITS_ONE,
+            timeout  = 0.1
+        )
+
+        self.serial_opened.set()
+
+        while True:
+            read_byte  = await self.serial_reader.read(1)
+            await self.serial_received_data(read_byte)
+
+    async def serial_write(self, data):
+        logger.info(f"Writing on serial port: {data}")
+        async with asyncio.timeout(0.1):
+            await self.serial_opened.wait()
+        self.serial_writer.write(data)
+
+        # Send to spy endpoint
+        await self.client.publish(f"{self.topic}/out", data)
+
+        # Drain buffered data to serial port
+        await self.serial_writer.drain()
+
+
     # ------------------- Generic message send
 
     async def send_to_endpoint_client(self, endpoint, msg):
         logger.debug(f"Sending message '{msg}' to endpoint '{endpoint}'")
-        await self.client.publish(f"{self.topic}/{endpoint}/request/client_endpoint", payload=msg.encode("ascii"))
+        await self.client.publish(f"{self.topic}/endpoints/{endpoint}/request/client_endpoint", payload=msg.encode("ascii"))
+
+    async def send_current_endpoint(self, endpoint):
+        logger.debug(f"Set current endpoint to '{endpoint}'")
+        await self.client.publish(f"{self.topic}/current_endpoint", payload=endpoint.encode("ascii"))
+
+    async def send_received_data(self, data):
+        logger.debug(f"Send received data to spy endpoint")
+        await self.client.publish(f"{self.topic}/in", payload=data)
+
+    async def send_data_to_endpoint(self, endpoint, data):
+        logger.debug(f"Sending data '{data}' to endpoint '{endpoint}'")
+        await self.client.publish(f"{self.topic}/endpoints/{endpoint}/in", payload=data)
 
 
     # ------------------- Utilities
@@ -109,6 +173,7 @@ class ServerStateMachine(object):
 
     async def action_endpoint_lock_ok(self, endpoint):
         self.active_endpoint = endpoint
+        await self.send_current_endpoint(endpoint)
         await self.send_to_endpoint_client(endpoint, "ok")
 
     async def action_endpoint_lock_fail(self, endpoint):
@@ -118,8 +183,8 @@ class ServerStateMachine(object):
         await self.unlock_yes(self.active_endpoint)
 
     async def action_endpoint_unlock_yes(self, endpoint):
-        self.got_unlock_response.set()
         self.active_endpoint = None
+        await self.send_current_endpoint("")
         await self.send_to_endpoint_client(endpoint, "yes")
 
     async def action_endpoint_unlock_no(self, endpoint):
@@ -143,6 +208,7 @@ class ServerStateMachine(object):
 
         self.active_endpoint  = self.replace_endpoint
         self.replace_endpoint = None
+        await self.send_current_endpoint(self.active_endpoint)
         await self.send_to_endpoint_client(self.active_endpoint, "ok")
 
     async def action_replace_reject(self):
@@ -246,7 +312,7 @@ class ClientStateMachine(object):
 
     # ------------------- Worker and request processing
 
-    async def worker(self):
+    async def mqtt_worker(self):
         self.log.info("Starting client worker task...")
         async with self.client.messages() as messages:
             await self.client.subscribe(f"{self.base_topic}/{self.name}/request/client_endpoint")
@@ -275,10 +341,10 @@ class ClientStateMachine(object):
 
 async def client_task():
     async with aiomqtt.Client("localhost") as client:
-        client_fsm = ClientStateMachine(client, "interfaces", "serial")
+        client_fsm = ClientStateMachine(client, "interfaces/serial/endpoints", "serial")
 
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(client_fsm.worker())
+            tg.create_task(client_fsm.mqtt_worker())
 
             await asyncio.sleep(1)
             await client_fsm.lock()
@@ -294,11 +360,11 @@ async def client_task():
 
 async def client2_task():
     async with aiomqtt.Client("localhost") as client:
-        client_fsm = ClientStateMachine(client, "interfaces", "serial2")
+        client_fsm = ClientStateMachine(client, "interfaces/serial/endpoints", "serial2")
         client_fsm.test_timeout = True
 
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(client_fsm.worker())
+            tg.create_task(client_fsm.mqtt_worker())
 
             await asyncio.sleep(4)
             await client_fsm.lock()
@@ -309,10 +375,15 @@ async def client2_task():
 async def server_task():
     logger.info("Starting server task...")
     async with aiomqtt.Client("localhost") as client:
-        server_fsm = ServerStateMachine(client, "interfaces")
+        server_fsm = ServerStateMachine(client, "interfaces/serial", "/dev/serial/by-id/usb-FTDI_UART_Adapter-if00-port0")
 
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(server_fsm.worker())
+            tg.create_task(server_fsm.mqtt_worker())
+            tg.create_task(server_fsm.serial_worker())
+
+            await asyncio.sleep(10)
+
+            await server_fsm.serial_write("Hello world".encode("ascii"));
 
 async def main():
     logging.basicConfig(level=logging.DEBUG)

@@ -41,4 +41,5 @@ ensure_mosquitto:
 logs_mosquitto *args: ensure_mosquitto
 	docker logs {{args}} {{mosquitto_container_name}} 
 
-	
+create_ports:
+	socat -d -d -v pty,rawer,echo=0,link=./reader pty,rawer,echo=0,link=./writer
