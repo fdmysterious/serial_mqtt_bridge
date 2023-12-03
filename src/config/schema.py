@@ -101,50 +101,13 @@ class EndpointSerialMirrorConfig:
 
 
 @dataclass
-class EndpointVirtualConfig:
-    name: str
-
-    @classmethod
-    def from_dict(cls, x):
-        _check_type(x, "name", str)
-
-        return cls(
-            name = x["name"],
-        )
-
-@dataclass
-class EndpointConfig:
-    ENDPOINT_PROVIDERS = {
-        "serial-mirror":  EndpointSerialMirrorConfig,
-        "virtual":        EndpointVirtualConfig, 
-    }
-
-    provider:    str
-    config_data: any
-
-    @classmethod
-    def from_dict(cls, x):
-        _check_type(x, "provider", str)
-
-        if not x["provider"] in cls.ENDPOINT_PROVIDERS:
-            raise ValueError(f"Unknown endpoint provider: {x['provider']}")
-
-        return cls(
-            provider    = x["provider"],
-            config_data = cls.ENDPOINT_PROVIDERS[x['provider']].from_dict(x)
-        )
-
-
-@dataclass
 class ConfigSchema:
     serial: SerialConfig
     mqtt: MqttConfig
-    endpoints: Tuple[EndpointConfig]
 
     @classmethod
     def from_dict(cls, x):
         return cls(
             serial    = SerialConfig.from_dict(x["serial"]),
             mqtt      = MqttConfig.from_dict(x["mqtt"]),
-            endpoints = tuple(map(EndpointConfig.from_dict, x.get("endpoints", []))),
         )

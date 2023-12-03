@@ -270,101 +270,6 @@ def test_mqtt_config_invalid_password():
         mqtt_config = schema.MqttConfig.from_dict(config_dict)
 
 
-# ------------------------- Tests for serial-mirror endpoint config
-
-def test_endpoint_serial_mirror_config():
-    from config import schema
-
-    config_section = dedent("""
-        provider = "serial-mirror"
-        name     = "my_mirror"
-        path     = "/dev/serial/by-id/serial_mirror"
-    """)
-
-    config_dict     = toml.loads(config_section)
-    endpoint_config = schema.EndpointConfig.from_dict(config_dict)
-
-    assert endpoint_config.provider == "serial-mirror", "Invalid provider"
-    assert isinstance(endpoint_config.config_data, schema.EndpointSerialMirrorConfig), "Invalid endpoint config_data type"
-    assert endpoint_config.config_data.name == "my_mirror", "Invalid endpoint name"
-    assert endpoint_config.config_data.path == "/dev/serial/by-id/serial_mirror", "Invalid endpoint path"
-
-
-def test_endpoint_serial_mirror_invalid_name():
-    from config import schema
-
-    config_section = dedent("""
-        provider = "serial-mirror"
-        name     = 2938
-        path     = "/dev/serial/by-id/serial-mirror"
-    """)
-
-    config_dict     = toml.loads(config_section)
-    with pytest.raises(ValueError):
-        endpoint_config = schema.EndpointConfig.from_dict(config_dict)
-
-
-def test_endpoint_serial_mirror_invalid_path():
-    from config import schema
-
-    config_section = dedent("""
-        provider = "serial-mirror"
-        name     = "my_mirror"
-        path     = 2938
-    """)
-
-    config_dict     = toml.loads(config_section)
-    with pytest.raises(ValueError):
-        endpoint_config = schema.EndpointConfig.from_dict(config_dict)
-
-
-# ------------------------- Tests for virtual endpoint config
-
-def test_endpoint_virtual_config():
-    from config import schema
-
-    config_section = dedent("""
-        provider = "virtual"
-        name     = "virtual_1"
-    """)
-
-    config_dict     = toml.loads(config_section)
-    endpoint_config = schema.EndpointConfig.from_dict(config_dict)
-
-    assert endpoint_config.provider == "virtual", "Invalid provider"
-    assert isinstance(endpoint_config.config_data, schema.EndpointVirtualConfig), "Invalid endpoint config_data type"
-    assert endpoint_config.config_data.name == "virtual_1", "Invalid endpoint name"
-
-
-def test_endpoint_virtual_invalid_name():
-    from config import schema
-
-    config_section = dedent("""
-        provider = "virtual"
-        name     = 2938
-    """)
-
-    config_dict     = toml.loads(config_section)
-    with pytest.raises(ValueError):
-        endpoint_config = schema.EndpointConfig.from_dict(config_dict)
-
-
-# ------------------------- Tests for endpoint config
-
-def test_endpoint_invalid_provider():
-    from config import schema
-
-    config_section = dedent("""
-        provider = "seiral-mirror"
-        name     = "oopsie"
-        path     = "/dev/serial/by-id/oopsie"
-    """)
-
-    config_dict     = toml.loads(config_section)
-    with pytest.raises(ValueError):
-        endpoint_config = schema.EndpointConfig.from_dict(config_dict)
-    
-
 # ------------------------- Tests for global config
 
 def test_config():
@@ -382,15 +287,6 @@ def test_config():
         host         = "localhost"
         port         = 1883
         topic_prefix = "itf/serial"
-
-        [[endpoints]]
-        provider = "serial-mirror"
-        name     = "my_mirror"
-        path     = "/dev/serial/by-id/my_serial_mirror"
-
-        [[endpoints]]
-        provider = "virtual"
-        name     = "protocol-1"
     """)
 
     config_dict = toml.loads(config_section)
@@ -405,12 +301,3 @@ def test_config():
     assert config_file.mqtt.host             == "localhost"                                   , "Invalid mqtt host"
     assert config_file.mqtt.port             == 1883                                          , "Invalid mqtt port"
     assert config_file.mqtt.topic_prefix     == "itf/serial"                                  , "Invalid mqtt topic_prefix"
-
-    assert config_file.endpoints[0].provider == "serial-mirror"                               , "Invalid endpoint[0] provider"
-    assert isinstance(config_file.endpoints[0].config_data, schema.EndpointSerialMirrorConfig), "Invalid endpoint[0] config_data type"
-    assert config_file.endpoints[0].config_data.name == "my_mirror"                           , "Invalid endpoint[0] name"
-    assert config_file.endpoints[0].config_data.path == "/dev/serial/by-id/my_serial_mirror"  , "Invalid endpoint[0] path"
-
-    assert config_file.endpoints[1].provider == "virtual"                                     , "Invalid endpoint[0] provider"
-    assert isinstance(config_file.endpoints[1].config_data, schema.EndpointVirtualConfig)     , "Invalid endpoint[0] config_data type"
-    assert config_file.endpoints[1].config_data.name == "protocol-1"                          , "Invalid endpoint[0] name"
