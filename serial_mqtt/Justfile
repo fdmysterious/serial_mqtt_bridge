@@ -1,0 +1,3 @@
+mosquitto_container_name := "mosquitto"
+start_mosquitto:
+	docker run --rm --name {{mosquitto_container_name}} -d -p 9001:9001 -p 1883:1883 -v `pwd`/mosquitto.conf:/mosquitto/config/mosquitto.conf eclipse-mosquitto
